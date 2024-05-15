@@ -12,6 +12,7 @@ from sat.model import AutoModel
 from utils.utils import chat, llama2_tokenizer, llama2_text_processor_inference, get_image_processor
 from utils.models import CogAgentModel, CogVLMModel
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max_length", type=int, default=2048, help='max length of the total sequence')
@@ -67,54 +68,23 @@ def main():
 
     text_processor_infer = llama2_text_processor_inference(tokenizer, args.max_length, model.image_length)
 
-    if args.chinese:
-        if rank == 0:
-            print('欢迎使用 CogAgent-CLI ，输入图像URL或本地路径读图，继续输入内容对话，clear 重新开始，stop 终止程序')
-    else:
-        if rank == 0:
-            print('Welcome to CogAgent-CLI. Enter an image URL or local file path to load an image. Continue inputting text to engage in a conversation. Type "clear" to start over, or "stop" to end the program.')
-    with torch.no_grad():
-        while True:
+    # Specify the folder path containing the images
+    image_folder = "/data/SDU-GAMODv4/SDU-GAMODv4/scaled_dataset/val/droneview"
+
+    # Get a list of image file paths from the folder
+    image_files = [os.path.join(image_folder, f) for f in os.listdir(image_folder) if f.endswith((".jpg", ".png", ".jpeg"))]
+
+    # Specify the fixed query
+    query = "Describe the image in details and the events happening"
+
+    # Open a text file to store the responses
+    output_file = "responses.txt"
+    with open(output_file, "w") as f:
+        for image_path in image_files:
             history = None
             cache_image = None
-            if args.chinese:
-                if rank == 0:
-                    image_path = [input("请输入图像路径或URL： ")]
-                else:
-                    image_path = [None]
-            else:
-                if rank == 0:
-                    image_path = [input("Please enter the image path or URL: ")]
-                else:
-                    image_path = [None]
-            if world_size > 1:
-                torch.distributed.broadcast_object_list(image_path, 0)
-            image_path = image_path[0]
-            assert image_path is not None
 
-            if image_path == 'stop':
-                break
-
-            if args.chinese:
-                if rank == 0:
-                    query = [input("用户：")]
-                else:
-                    query = [None]
-            else:
-                if rank == 0:
-                    query = [input("User: ")]
-                else:
-                    query = [None]
-            if world_size > 1:
-                torch.distributed.broadcast_object_list(query, 0)
-            query = query[0]
-            assert query is not None
-            
-            while True:
-                if query == "clear":
-                    break
-                if query == "stop":
-                    sys.exit(0)
+            with torch.no_grad():
                 try:
                     response, history, cache_image = chat(
                         image_path,
@@ -131,30 +101,21 @@ def main():
                         top_k=args.top_k,
                         invalid_slices=text_processor_infer.invalid_slices,
                         args=args
-                        )
+                    )
                 except Exception as e:
                     print(e)
-                    break
-                if rank == 0 and not args.stream_chat:
-                    if args.chinese:
-                        print("模型："+response)
-                    else:
-                        print("Model: "+response)
-                image_path = None
-                if args.chinese:
-                    if rank == 0:
-                        query = [input("用户：")]
-                    else:
-                        query = [None]
-                else:
-                    if rank == 0:
-                        query = [input("User: ")]
-                    else:
-                        query = [None]
-                if world_size > 1:
-                    torch.distributed.broadcast_object_list(query, 0)
-                query = query[0]
-                assert query is not None
+                    continue
+
+            if rank == 0 and not args.stream_chat:
+                print("Processing image:", image_path)
+                print("Model response:", response)
+
+                # Write the image path and response to the text file
+                f.write(f"Image: {image_path}\n")
+                f.write(f"Response: {response}\n")
+                f.write("\n")
+
+    print("Responses stored in", output_file)
 
 
 if __name__ == "__main__":
